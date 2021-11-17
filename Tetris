@@ -1,0 +1,549 @@
+globals [
+  score
+  level
+  lines
+  next-shape
+  game-over?
+  amount
+]
+breed [ pieces piece ]   ;; pieces fall through the air...
+breed [ blocks block ]   ;; ...and when they land, they become blocks
+
+pieces-own [
+  x y      ;; these are the piece's offsets relative to turtle 0
+]
+blocks-own [
+  line     ;; the bottom line is line 0, above it is line 1, and so on
+]
+
+;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Setup Procedures ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;
+to new
+  clear-all
+  set-default-shape turtles "square big"
+  set score 0
+  set level starting-level
+  set lines 0
+  set next-shape random 39
+  set game-over? false
+ create-pieces number-pieces
+  [set heading 180]
+  ;; draw the board
+  ask patches
+  [ ifelse (pxcor = -18) or (pxcor > 8) or (pycor = min-pycor)
+    [ set pcolor gray ]
+    [ ;; make debris
+      if ((pycor + max-pycor) <= debris-level and
+          (pycor + max-pycor) > 0 and
+          (random 2 = 0))
+      [ sprout-blocks 1
+        [ set line (pycor + max-pycor)
+          set heading 180
+          set color blue ]
+      ]
+    ]
+  ]
+  ;; make the "Next Piece" area
+  ask patch 13 10 [ set plabel "Next" ]
+  ask patches with [((pxcor > 9) and (pxcor < 14) and
+                     (pycor > 5) and (pycor < 11))]
+  [ set pcolor black ]
+  ;; setup the new piece
+  new-piece
+  reset-ticks
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Interface Buttons ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;
+to rotate-right
+  if rotate-right-clear? and not game-over?
+    [ ask pieces [ rotate-me-right ] ]
+end
+
+to rotate-me-right  ;; Piece Procedure
+  let oldx x
+  let oldy y
+  set x oldy
+  set y (- oldx)
+  set xcor ([xcor] of turtle 0) + x
+  set ycor ([ycor] of turtle 0) + y
+end
+
+to rotate-left
+  if rotate-left-clear? and not game-over?
+    [ ask pieces [ rotate-me-left ] ]
+end
+
+to rotate-me-left  ;; Piece Procedure
+  let oldx x
+  let oldy y
+  set x (- oldy)
+  set y oldx
+  set xcor ([xcor] of turtle 0) + x
+  set ycor ([ycor] of turtle 0) + y
+end
+
+to shift-right
+  if (clear-at? 1 0) and not game-over?
+    [ ask pieces [ set xcor xcor + 1 ] ]
+end
+
+to shift-left
+  if (clear-at? -1 0) and not game-over?
+    [ ask pieces [ set xcor xcor - 1 ] ]
+end
+
+to shift-down
+  ifelse (clear-at? 0 -1) and not game-over?
+    [ ask pieces [ fd 1 ] ]
+    [ place-piece ]
+end
+
+to drop-down
+  while [(clear-at? 0 -1) and not game-over?]
+    [ ask pieces [ fd 1 ] display ]
+  place-piece
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Runtime Procedures ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+to play
+  if game-over? [ stop ]
+  every (0.01 + 0.12 * (10 - level))
+    [ shift-down
+      check-lines ]
+  display
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Overlap prevention Reporters ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+to-report clear? [p]  ;; p is a patch
+  if p = nobody [ report false ]
+  report (not any? blocks-on p) and ([pcolor] of p != gray)
+end
+
+to-report clear-at? [xoff yoff]
+  report all? pieces [clear? patch-at xoff yoff]
+end
+
+to-report rotate-left-clear?
+  report all? pieces [clear? patch-at (- y) x]
+end
+
+to-report rotate-right-clear?
+  report all? pieces [clear? patch-at y (- x)]
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Blocks Procedures ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;
+to check-lines
+  let n 1
+  let line-count 0
+  repeat (2 * max-pycor)
+  [ ifelse (count blocks with [line = n] = 12)
+    [ delete-line n
+      set line-count line-count + 1 ]
+    [ set n n + 1 ]
+  ]
+  score-lines line-count
+  set lines lines + line-count
+  if (floor (lines / 10) > level)
+  [ set level floor (lines / 10) ]
+end
+
+to delete-line [n]
+  ask blocks with [line = n] [ die ]
+  ask blocks with [line > n]
+  [ fd 1
+    set line (pycor + max-pycor) ]
+end
+
+to score-lines [n]
+  let bonus 0
+  if n = 1 [ set bonus 50   * (level + 1) ]
+  if n = 2 [ set bonus 150  * (level + 1) ]
+  if n = 3 [ set bonus 350  * (level + 1) ]
+  if n = 4 [ set bonus 1000 * (level + 1) ]
+  if (not any? blocks) and (n > 0)
+  [ set bonus bonus + 2000 * (level + 1) ]
+  set score score + bonus
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Pieces Procedures ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;
+to place-piece
+  ask pieces
+  [ hatch-blocks 1
+    [ set line (pycor + max-pycor) ]
+  ]
+  set score score + 2 * (count pieces)
+  new-piece
+end
+
+to new-piece
+  let new-shape next-shape
+  set next-shape random 39
+  if (show-next?) [ show-next-piece ]
+  ask turtle 0 [ setxy -4 18]
+  ask pieces
+  [ setup-piece new-shape ]
+  if any? pieces with [any? other turtles-here]
+  [ user-message "Game Over"
+    set game-over? true ]
+end
+
+to show-next-piece
+  ask patches with [(pxcor > 11) and (pxcor < 17) and (pycor > 5) and (pycor < 11)]
+  [ set pcolor black ]
+  ask turtle 0 [ setxy 13 8]
+  ask pieces
+  [ setup-piece next-shape
+    set pcolor color ]
+end
+
+to setup-piece [s]  ;; Piece Procedure
+  if (s = 0) [ setup-o  set color blue set amount 4   ]
+  if (s = 1) [ setup-l  set color red  set amount 4  ]
+  if (s = 2) [ setup-j  set color yellow set amount 4 ]
+  if (s = 3) [ setup-t  set color green set amount 4 ]
+  if (s = 4) [ setup-s  set color orange set amount 4 ]
+  if (s = 5) [ setup-z  set color sky  set amount 4 ]
+  if (s = 6) [ setup-i  set color violet set amount 4 ]
+  if (s = 7) [ setup-sqaure set color blue set amount 1]
+  if (s = 8) [ setup-hor2 set color red set amount 2]
+  if (s = 9) [ setup-ver2 set color yellow set amount 2]
+  if (s = 10) [ setup-hor3 set color green set amount 3 ]
+  if (s = 11) [ setup-ver3 set color orange set amount 3]
+  if (s = 12) [ setup-Lblock set color sky set amount 3]
+  if (s = 13) [ setup-reverseLblock set color violet set amount 3]
+   if (s = 14) [ setup-a5 set color red set amount 5]
+   if (s = 15) [ setup-b5 set color yellow set amount 5]
+   if (s = 16) [ setup-c5 set color green set amount 5]
+   if (s = 17) [ setup-g5 set color red set amount 5]
+   if (s = 18) [ setup-d5 set color orange set amount 5]
+   if (s = 19) [ setup-e5 set color sky set amount 5]
+   if (s = 20) [ setup-f5 set color violet set amount 5 ]
+   if (s = 21) [ setup-g5 set color blue set amount 5 ]
+   if (s = 22) [ setup-h5 set color red set amount 5 ]
+   if (s = 23) [ setup-i5 set color yellow set amount 5 ]
+   if (s = 24) [ setup-j5 set color green set amount 5 ]
+   if (s = 25) [ setup-k5 set color orange set amount 5 ]
+   if (s = 26) [ setup-l5 set color sky set amount 5 ]
+   if (s = 27) [ setup-m5 set color violet set amount 5 ]
+   if (s = 28) [ setup-n5 set color blue  set amount 5 ]
+   if (s = 29) [ setup-o5 set color red set amount 5 ]
+   if (s = 30) [ setup-p5 set color yellow set amount 5 ]
+   if (s = 31) [ setup-q5 set color green set amount 5 ]
+   if (s = 32) [ setup-r5 set color orange set amount 5 ]
+   if (s = 33) [ setup-s5 set color sky set amount 5 ]
+  if (s = 34) [ setup-a6 set color violet set amount 6 ]
+  if (s = 35) [ setup-b6 set color blue set amount 6 ]
+  if (s = 36) [ setup-c6 set color red set amount 6 ]
+  if (s = 37) [ setup-d6 set color yellow set amount 6 ]
+  if (s = 38) [ setup-e6 set color green set amount 6 ]
+  setxy ([xcor] of turtle 0) + x
+        ([ycor] of turtle 0) + y
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Pieces Setup Procedures ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; The numbers 012345 show the relative positions of turtles
+
+;; 2 Blocks
+;; Square Block
+to setup-sqaure
+  if (who = 1) [ set x 0 set y 0 ]
+end
+
+to setup-hor2
+ if (who = 1) [ set x 1 set y 0 ]
+end
+
+to setup-ver2
+ if (who = 1) [ set x 0 set y 1]
+end
+
+
+
+;; 3 Blocks
+to setup-hor3
+  if (who = 1) [ set x 1 set y 0 ]
+  if (who = 2) [ set x -1 set y 0 ]
+end
+
+to setup-ver3
+  if (who = 1) [ set x 1 set y 0]
+  if (who = 2) [ set x -1 set y 0]
+end
+
+to setup-Lblock
+  if (who = 1) [ set x 1 set y 0]
+  if (who = 2) [ set x 0 set y 1]
+end
+
+to setup-reverseLblock
+ if (who = 1) [ set x 1 set y 0]
+  if (who = 2) [ set x 1 set y 1]
+end
+
+
+
+;; 5 Blocks
+;; Horizontal Line
+to setup-a5
+  if (who = 1) [ set x 2 set y 0 ]
+  if (who = 2) [ set x 1 set y 0 ]
+  if (who = 3) [ set x -1 set y 0 ]
+  if (who = 4) [ set x -2 set y 0]
+end
+
+;; Vertical Line
+to setup-b5
+  if (who = 1) [ set x  0 set y  1 ]
+  if (who = 2) [ set x 0 set y  2]
+  if (who = 3) [ set x 0 set y -1 ]
+  if (who = 4) [ set x 0 set y -2]
+end
+
+;;Long L Block
+to setup-c5
+  if (who = 1) [ set x 1 set y  0 ]
+  if (who = 2) [ set x  2 set y  0 ]
+  if (who = 3) [ set x  3 set y 0 ]
+  if (who = 4) [ set x 0 set y -1]
+end
+
+;;Long Reverse L Block
+to setup-d5
+  if (who = 1) [ set x  -3 set y  0 ]
+  if (who = 2) [ set x -2 set y  0 ]
+  if (who = 3) [ set x  -1 set y 0]
+  if (who = 4) [ set x 0 set y -1 ]
+end
+
+;;Short L Block
+to setup-e5
+  if (who = 1) [ set x  1 set y  0 ]
+  if (who = 2) [ set x 2 set y 0 ]
+  if (who = 3) [ set x  0 set y 1 ]
+  if (who = 4) [ set x 0 set y 2]
+end
+
+;;T Block
+to setup-f5
+  if (who = 1) [ set x -1 set y  0 ]
+  if (who = 2) [ set x  1 set y 0 ]
+  if (who = 3) [ set x  0 set y -1 ]
+  if (who = 4) [ set x 0 set y -2]
+end
+
+;;T Block
+to setup-h5
+  if (who = 1) [ set x -1 set y 0 ]
+  if (who = 2) [ set x  1 set y 0]
+  if (who = 3) [ set x  0 set y -1]
+  if (who = 4) [ set x 0 set y 1]
+end
+
+;;Stair Block
+to setup-g5
+  if (who = 1) [ set x -1 set y 0 ]
+  if (who = 2) [ set x  -1 set y 1 ]
+  if (who = 3) [ set x  1 set y 0 ]
+  if (who = 4) [ set x 1 set y -1]
+end
+
+;;U Block
+to setup-i5
+  if (who = 1) [ set x -1 set y 0 ]
+  if (who = 2) [ set x  -1 set y 1 ]
+  if (who = 3) [ set x  1 set y 0 ]
+  if (who = 4) [ set x 1 set y 1]
+end
+
+;;6-shaped Block
+to setup-j5
+  if (who = 1) [ set x 0 set y 1 ]
+  if (who = 2) [ set x  0 set y 2 ]
+  if (who = 3) [ set x  1 set y 0 ]
+  if (who = 4) [ set x 1 set y 1]
+end
+
+;;Reverse 6-shapeed Block
+to setup-k5
+  if (who = 1) [ set x 0 set y 1]
+  if (who = 2) [ set x  1 set y 0 ]
+  if (who = 3) [ set x  1 set y 1 ]
+  if (who = 4) [ set x 1 set y 2]
+end
+
+;;S-shaped Block
+to setup-l5
+  if (who = 1) [ set x 0 set y 1 ]
+  if (who = 2) [ set x  0 set y -1]
+  if (who = 3) [ set x  -1 set y 1 ]
+  if (who = 4) [ set x 1 set y -1]
+end
+
+;;Reverse S-shaped Block
+to setup-m5
+  if (who = 1) [ set x 0 set y 1]
+  if (who = 2) [ set x  0 set y -1 ]
+  if (who = 3) [ set x  -1 set y -1]
+  if (who = 4) [ set x 1 set y 1]
+end
+
+
+;;Person Block
+to setup-n5
+  if (who = 1) [ set x 0 set y 1]
+  if (who = 2) [ set x  1 set y 0]
+  if (who = 3) [ set x  0 set y -1]
+  if (who = 4) [ set x -1 set y -1]
+end
+
+
+;;Reverse Person Block
+to setup-o5
+  if (who = 1) [ set x 0 set y 1]
+  if (who = 2) [ set x  0 set y -1 ]
+  if (who = 3) [ set x  -1 set y -1]
+  if (who = 4) [ set x 1 set y 0]
+end
+
+;;Z-shaped Block
+to setup-p5
+  if (who = 1) [ set x 1 set y 0]
+  if (who = 2) [ set x  2 set y 0]
+  if (who = 3) [ set x  0 set y 1]
+  if (who = 4) [ set x -1 set y 1]
+end
+
+;;Reverse Z-shaped Block
+to setup-q5
+  if (who = 1) [ set x -1 set y 0]
+  if (who = 2) [ set x  -2 set y 0 ]
+  if (who = 3) [ set x  0 set y 1]
+  if (who = 4) [ set x 1 set y 1]
+end
+
+;;Half T-Block
+to setup-r5
+  if (who = 1) [ set x 1 set y 0]
+  if (who = 2) [ set x  -1 set y 0 ]
+  if (who = 3) [ set x  -2 set y 0]
+  if (who = 4) [ set x 0 set y 1]
+end
+
+;;Reverse Half T-Block
+to setup-s5
+  if (who = 1) [ set x -1 set y 0]
+  if (who = 2) [ set x  -2 set y 0 ]
+  if (who = 3) [ set x  1 set y 0]
+  if (who = 4) [ set x 0 set y 1]
+end
+
+
+
+;; 4 Blocks
+to setup-o
+  if (who = 1) [ set x 1 set y  0 ]
+  if (who = 2) [ set x 0 set y -1 ]
+  if (who = 3) [ set x 1 set y -1 ]
+end
+
+to setup-l
+  if (who = 1) [ set x  1 set y  0 ]
+  if (who = 2) [ set x -1 set y  0 ]
+  if (who = 3) [ set x -1 set y -1 ]
+end
+
+to setup-j
+  if (who = 1) [ set x -1 set y  0 ]
+  if (who = 2) [ set x  1 set y  0 ]
+  if (who = 3) [ set x  1 set y -1 ]
+end
+
+to setup-t
+  if (who = 1) [ set x  1 set y  0 ]
+  if (who = 2) [ set x -1 set y  0 ]
+  if (who = 3) [ set x  0 set y -1 ]
+end
+
+to setup-s
+  if (who = 1) [ set x  1 set y  0 ]
+  if (who = 2) [ set x -1 set y -1 ]
+  if (who = 3) [ set x  0 set y -1 ]
+end
+
+to setup-z
+  if (who = 1) [ set x -1 set y  0 ]
+  if (who = 2) [ set x  1 set y -1 ]
+  if (who = 3) [ set x  0 set y -1 ]
+end
+
+to setup-i
+  if (who = 1) [ set x -1 set y 0 ]
+  if (who = 2) [ set x  1 set y 0 ]
+  if (who = 3) [ set x  2 set y 0 ]
+end
+
+
+
+;;6 Blocks
+
+;; Rectangle
+to setup-a6
+  if (who = 1) [ set x 0 set y 1 ]
+  if (who = 2) [ set x 0 set y 2 ]
+  if (who = 3) [ set x -1 set y 0 ]
+  if (who = 4) [ set x -1 set y 1 ]
+  if (who = 5) [ set x -1 set y 2 ]
+end
+
+;; Vertical
+to setup-b6
+  if (who = 1) [ set x 0 set y -4 ]
+  if (who = 2) [ set x 0 set y -3 ]
+  if (who = 3) [ set x 0 set y -2 ]
+  if (who = 4) [ set x 0 set y -1 ]
+  if (who = 5) [ set x 0 set y 1 ]
+end
+
+;; Horizontal
+to setup-c6
+  if (who = 1) [ set x -3 set y 0 ]
+  if (who = 2) [ set x -2 set y 0 ]
+  if (who = 3) [ set x -1 set y 0 ]
+  if (who = 4) [ set x  1 set y 0 ]
+  if (who = 5) [ set x  2 set y 0 ]
+end
+
+;; T-block
+to setup-d6
+  if (who = 1) [ set x 1 set y 0 ]
+  if (who = 2) [ set x -1 set y 0 ]
+  if (who = 3) [ set x 0 set y -1]
+  if (who = 4) [ set x  0 set y -2 ]
+  if (who = 5) [ set x  0 set y -3 ]
+end
+
+;;Cross Block
+to setup-e6
+  if (who = 1) [ set x -1 set y 0 ]
+  if (who = 2) [ set x 1 set y 0 ]
+  if (who = 3) [ set x 0 set y 1]
+  if (who = 4) [ set x  0 set y -1 ]
+  if (who = 5) [ set x  0 set y -2 ]
+end
+
+; Copyright 2001 Uri Wilensky.
+; See Info tab for full copyright and license.
